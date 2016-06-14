@@ -35,15 +35,14 @@ void fail(char *error) {
       exit (1);
 }
 
+int sn;
+struct dai_mon_vehicle_data vehicle;
+
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-struct dai_mon_vehicle_data data;
 bool fresh = false;
 
 void* udp_listener(void* args) {
       struct dai_mon_msg rcvd;
-
-      int msg_length = sizeof(rcvd);
-      int data_length = sizeof(data);
 
       // Create a UDP socket.
       int self_socket;
@@ -78,7 +77,8 @@ void* udp_listener(void* args) {
             printf("[UDP THREAD] received packet from: %s:%uh\n", inet_ntoa(other_address.sin_addr), ntohs(other_address.sin_port));
 
             pthread_mutex_lock(&mutex);
-            memcpy(&data, &rcvd.data, data_length);
+            vehicle = rcvd.vehicle;
+            sn = rcvd.serial_number;
             fresh = true;
             pthread_mutex_unlock(&mutex);
       }
@@ -89,7 +89,6 @@ void* udp_listener(void* args) {
 
 int main(void) {
       struct dai_mon_vehicle_data local;
-      int data_length = sizeof(data);
 
       pthread_t listener_tid;
 
@@ -99,10 +98,12 @@ int main(void) {
       for (;;) {
             if (fresh) {
                   pthread_mutex_lock(&mutex);
-                  memcpy(&local, &data, data_length);
+                  local = vehicle;
                   fresh = false;
                   pthread_mutex_unlock(&mutex);
 
+                  printf("--------------------\n");
+                  printf("Received #%d\n", sn);
                   printf("--------------------\n");
                   printf("vehicle_number: %s\n"
                          "latitude: %f\n"
@@ -111,8 +112,8 @@ int main(void) {
                          "ground_speed: %f\n"
                          "ground_track: %f\n"
                          "vertical_speed: %f\n"
-                         "time_ms: %ud\n",
-                         local.vehicle_number,
+                         "time_ms: %u\n",
+                         local.number,
                          local.latitude,
                          local.longitude,
                          local.altitude,
@@ -135,4 +136,4 @@ int main(void) {
       return 0;
 }
 
-void alert_wcv(void) { puts("ALERT: WCV VIOLATION!"); }
+void alert_wcv(void) { puts("alert: WCV violation!"); }

@@ -8,9 +8,9 @@
   main = reify spec >>= compile defaultParams
   ```
 
-2. Move the generated C source to `$WCV_ROOT/listener` (where `$WCV_ROOT` is the directory containing this README):
+2. Move the generated C source to `$WCV_ROOT/src` (where `$WCV_ROOT` is the directory containing this README):
   ```
-  $ mv copilot-sbv-codegen $WCV_ROOT/listener
+  $ mv copilot-sbv-codegen $WCV_ROOT/src
   ```
 
 3. Build the project:

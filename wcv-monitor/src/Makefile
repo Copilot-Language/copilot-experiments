@@ -1,4 +1,6 @@
-CFLAGS=-I../include
+CFLAGS=-I../include -Wall -Wpedantic --std=c99
+
+player: player.c
 
 listener: listener.c copilot-sbv-codegen/driver.c copilot-sbv-codegen/internal.a
 
@@ -8,4 +10,5 @@ copilot-sbv-codegen/internal.a:
 
 clean:
 	-rm *.o
+	-rm player
 	-rm listener
