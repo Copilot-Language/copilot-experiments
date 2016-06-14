@@ -2,19 +2,33 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
-
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-
 #include <pthread.h>
 
 #include "copilot.h"
 #include "dai_mon_data.h"
+#include "listener.h"
 
-#define PORT    10873   // The port on which to listen for incoming data.
+double latO;
+double lonO;
+double latI;
+double lonI;
+double dthr;
+double gsO;
+double trkO;
+double gsI;
+double trkI;
+double tthr;
+double altO;
+double altI;
+double zthr;
+double vsO;
+double vsI;
+double tcoathr;
 
 void fail(char *error) {
       perror(error);
@@ -72,18 +86,6 @@ void* udp_listener(void* args) {
       close(self_socket);
       return ((void*) 0);
 }
-
-double altI; double altO;
-double gsI;  double gsO;
-double latI; double latO;
-double lonI; double lonO;
-double trkI; double trkO;
-double vsI;  double vsO;
-
-double dthr;
-double tthr;
-double tcoathr;
-double zthr;
 
 int main(void) {
       struct dai_mon_vehicle_data local;

@@ -1,8 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-
 #include <string.h>
-
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -10,8 +8,7 @@
 #include <arpa/inet.h>
 
 #include "dai_mon_data.h"
-
-#define PORT 10873  // The port on which to listen for incoming data.
+#include "listener.h"
 
 void fail(const char *error) {
       perror(error);
@@ -51,5 +48,3 @@ int main(void) {
       close(other_socket);
       return 0;
 }
-
-
