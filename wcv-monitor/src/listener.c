@@ -8,12 +8,13 @@
 
 #include "copilot.h"
 #include "dai_mon_data.h"
-#include "listener.h"
 
 // Max number of vehicles encounterable before we start replacing the oldest.
 #define MAX_VEHICLES 500
 // Time to wait between checks (ms).
 #define DELAY 500
+// The port on which to listen for incoming data.
+#define PORT 10873
 
 char numO[TAIL_NUMBER_SIZE];
 double latO, lonO, gsO, trkO, altO, vsO;
@@ -72,7 +73,9 @@ static void * udp_listener(void *);
 static int find_vehicle(const char (*)[TAIL_NUMBER_SIZE]);
 static void update_vehicle(struct dai_mon_msg);
 static void run_monitor(void);
-static void delay(void);
+static void lock(pthread_mutex_t *);
+static void unlock(pthread_mutex_t *);
+static void nap(void);
 
 int main(void) {
       pthread_t listener_tid;
@@ -80,27 +83,27 @@ int main(void) {
       if (pthread_create(&listener_tid, NULL, udp_listener, NULL) != 0)
             fail("pthread_create()");
 
-      while (nvehicles < 2) delay();
+      while (nvehicles < 2) nap();
 
       for (;;) {
             for (int own = 0; own != nvehicles - 1; ++own) {
-                  if (vehicles[own].fresh) {
+                  lock(&vehicles[own].mutex);
+                  mon_vehicle(ownship, vehicles[own].vehicle);
+                  bool fresh = vehicles[own].fresh;
+                  vehicles[own].fresh = false;
+                  unlock(&vehicles[own].mutex);
 
-                        pthread_mutex_lock(&vehicles[own].mutex);
-                        mon_vehicle(ownship, vehicles[own].vehicle);
-                        vehicles[own].fresh = false;
-                        pthread_mutex_unlock(&vehicles[own].mutex);
-
+                  if (fresh) {
                         for (int intr = own + 1; intr != nvehicles; ++intr) {
-                              pthread_mutex_lock(&vehicles[intr].mutex);
+                              lock(&vehicles[intr].mutex);
                               mon_vehicle(intruder, vehicles[intr].vehicle);
-                              pthread_mutex_unlock(&vehicles[intr].mutex);
+                              unlock(&vehicles[intr].mutex);
 
                               run_monitor();
                         }
                   }
             }
-            delay();
+            nap();
       }
       return 0;
 }
@@ -131,11 +134,11 @@ int find_oldest(void) {
 void update_vehicle(struct dai_mon_msg msg) {
       int i;
       if ((i = find_vehicle(&msg.vehicle.number)) != -1) {
-            pthread_mutex_lock(&vehicles[i].mutex);
+            lock(&vehicles[i].mutex);
             vehicles[i].fresh = true;
             vehicles[i].serial_number = msg.serial_number;
             vehicles[i].vehicle = msg.vehicle;
-            pthread_mutex_unlock(&vehicles[i].mutex);
+            unlock(&vehicles[i].mutex);
       } else if (nvehicles < MAX_VEHICLES) {
             vehicles[nvehicles].fresh = true;
             vehicles[nvehicles].serial_number = msg.serial_number;
@@ -145,11 +148,11 @@ void update_vehicle(struct dai_mon_msg msg) {
       } else {
             puts("Too many vehicles, replacing the oldest!");
             int oldest = find_oldest();
-            pthread_mutex_lock(&vehicles[oldest].mutex);
+            lock(&vehicles[oldest].mutex);
             vehicles[oldest].fresh = true;
             vehicles[oldest].serial_number = msg.serial_number;
             vehicles[oldest].vehicle = msg.vehicle;
-            pthread_mutex_unlock(&vehicles[oldest].mutex);
+            unlock(&vehicles[oldest].mutex);
       }
 }
 
@@ -217,15 +220,30 @@ void run_monitor(void) {
 }
 
 void alert_wcv(void) {
-      puts("*** Alert triggered: well-clear violation! ***");
+      puts("*** Alert triggered: well-clear violation!");
+      printf("*** Ownship: %s, Intruder: %s\n", (char *) ownship.number, (char *) intruder.number);
+}
+
+void lock(pthread_mutex_t * mutex) {
+      if (pthread_mutex_lock(mutex)) {
+            fprintf(stderr, "Error: failed to acquire a lock... something bad has gone wrong, exiting.");
+            exit(1);
+      }
+}
+
+void unlock(pthread_mutex_t * mutex) {
+      if (pthread_mutex_unlock(mutex)) {
+            fprintf(stderr, "Error: failed to unlock a lock... something bad has gone wrong, exiting.");
+            exit(1);
+      }
+}
+
+void nap(void) {
+      struct timespec ts = { .tv_nsec = DELAY * 1000000 };
+      nanosleep(&ts, NULL);
 }
 
 void fail(const char * error) {
       perror(error);
       exit (1);
-}
-
-void delay(void) {
-      struct timespec ts = { .tv_nsec = DELAY * 1000000 };
-      nanosleep(&ts, NULL);
 }
