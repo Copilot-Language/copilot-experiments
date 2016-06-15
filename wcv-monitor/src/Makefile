@@ -1,5 +1,7 @@
 CFLAGS=-I../include -Wall -Wpedantic --std=c99
 
+all: player listener
+
 player: player.c
 
 listener: listener.c copilot-sbv-codegen/driver.c copilot-sbv-codegen/internal.a

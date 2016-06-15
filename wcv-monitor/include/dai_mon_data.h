@@ -10,7 +10,7 @@
 
 #define TAIL_NUMBER_SIZE 8 // 7 characters for ID + 1 null terminator
 
-struct dai_mon_vehicle_data {
+struct vehicle {
     char number[TAIL_NUMBER_SIZE];
     double latitude;        // degrees
     double longitude;       // degrees
@@ -23,7 +23,7 @@ struct dai_mon_vehicle_data {
 
 struct dai_mon_msg {
     long serial_number;
-    struct dai_mon_vehicle_data vehicle;
+    struct vehicle vehicle;
 };
 
 #endif

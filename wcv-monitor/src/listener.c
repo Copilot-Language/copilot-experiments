@@ -1,139 +1,231 @@
+#include <arpa/inet.h>
+#include <assert.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdbool.h>
 #include <string.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <unistd.h>
-#include <arpa/inet.h>
-#include <pthread.h>
 
 #include "copilot.h"
 #include "dai_mon_data.h"
 #include "listener.h"
 
-double latO;
-double lonO;
-double latI;
-double lonI;
-double dthr;
-double gsO;
-double trkO;
-double gsI;
-double trkI;
-double tthr;
-double altO;
-double altI;
-double zthr;
-double vsO;
-double vsI;
-double tcoathr;
+// Max number of vehicles encounterable before we start replacing the oldest.
+#define MAX_VEHICLES 500
+// Time to wait between checks (ms).
+#define DELAY 500
 
-void fail(char *error) {
-      perror(error);
-      exit (1);
-}
+char numO[TAIL_NUMBER_SIZE];
+double latO, lonO, gsO, trkO, altO, vsO;
+char numI[TAIL_NUMBER_SIZE];
+double latI, lonI, gsI, trkI, altI, vsI;
 
-int sn;
-struct dai_mon_vehicle_data vehicle;
+// TODO(chathhorn): initialize these
+double dthr = 1000;
+double tthr = 1000;
+double zthr = 1000;
+double tcoathr = 1000;
 
-pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-bool fresh = false;
+struct mon_vehicle {
+      char (* number)[TAIL_NUMBER_SIZE];
+      double * latitude;        // degrees
+      double * longitude;       // degrees
+      double * altitude;        // feet
+      double * ground_speed;    // knots
+      double * ground_track;    // degrees
+      double * vertical_speed;  // ft/min
+};
 
-void* udp_listener(void* args) {
-      struct dai_mon_msg rcvd;
+struct vehicle_meta {
+      long serial_number;
+      bool fresh;
+      pthread_mutex_t mutex;
+      struct vehicle vehicle;
+};
 
-      // Create a UDP socket.
-      int self_socket;
-      if ((self_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
-            fail("socket");
+static struct mon_vehicle ownship = {
+      .number = &numO,
+      .latitude = &latO,
+      .longitude = &lonO,
+      .altitude = &altO,
+      .ground_speed = &gsO,
+      .ground_track = &trkO,
+      .vertical_speed = &vsO,
+};
 
-      struct sockaddr_in self_address = {0};
-      self_address.sin_family = AF_INET;
-      self_address.sin_port = htons(PORT);
-      self_address.sin_addr.s_addr = htonl(INADDR_ANY);
+static struct mon_vehicle intruder = {
+      .number = &numI,
+      .latitude = &latI,
+      .longitude = &lonI,
+      .altitude = &altI,
+      .ground_speed = &gsI,
+      .ground_track = &trkI,
+      .vertical_speed = &vsI,
+};
 
-      // Bind socket to port.
-      if (bind(self_socket, (struct sockaddr*) &self_address, sizeof(self_address)) == -1)
-            fail("bind");
+static int nvehicles;
+static struct vehicle_meta vehicles[MAX_VEHICLES];
 
-      // Keep listening for data.
-      for (;;) {
-            printf("[UDP THREAD] waiting for data...\n");
-
-            // Try to receive some data, this is a blocking call.
-            struct sockaddr_in other_address;
-            socklen_t address_length = sizeof(other_address);
-            ssize_t actual_length;
-            if ((actual_length = recvfrom(self_socket, &rcvd, sizeof(rcvd), 0, (struct sockaddr *) &other_address, &address_length)) == -1)
-                  fail("recvfrom()");
-
-            // TODO(chathhorn)
-            if (actual_length < sizeof(rcvd))
-                  fail("received incomplete message, so we're failing instead of waiting for the rest.");
-
-            // Print details of the client/peer and the data received.
-            printf("[UDP THREAD] received packet from: %s:%uh\n", inet_ntoa(other_address.sin_addr), ntohs(other_address.sin_port));
-
-            pthread_mutex_lock(&mutex);
-            vehicle = rcvd.vehicle;
-            sn = rcvd.serial_number;
-            fresh = true;
-            pthread_mutex_unlock(&mutex);
-      }
-
-      close(self_socket);
-      return ((void*) 0);
-}
+static void mon_vehicle(struct mon_vehicle, struct vehicle);
+static void fail(const char *);
+static void * udp_listener(void *);
+static int find_vehicle(const char (*)[TAIL_NUMBER_SIZE]);
+static void update_vehicle(struct dai_mon_msg);
+static void run_monitor(void);
+static void delay(void);
 
 int main(void) {
-      struct dai_mon_vehicle_data local;
-
       pthread_t listener_tid;
 
       if (pthread_create(&listener_tid, NULL, udp_listener, NULL) != 0)
             fail("pthread_create()");
 
+      while (nvehicles < 2) delay();
+
       for (;;) {
-            if (fresh) {
-                  pthread_mutex_lock(&mutex);
-                  local = vehicle;
-                  fresh = false;
-                  pthread_mutex_unlock(&mutex);
+            for (int own = 0; own != nvehicles - 1; ++own) {
+                  if (vehicles[own].fresh) {
 
-                  printf("--------------------\n");
-                  printf("Received #%d\n", sn);
-                  printf("--------------------\n");
-                  printf("vehicle_number: %s\n"
-                         "latitude: %f\n"
-                         "longitude: %f\n"
-                         "altitude: %f\n"
-                         "ground_speed: %f\n"
-                         "ground_track: %f\n"
-                         "vertical_speed: %f\n"
-                         "time_ms: %u\n",
-                         local.number,
-                         local.latitude,
-                         local.longitude,
-                         local.altitude,
-                         local.ground_speed,
-                         local.ground_track,
-                         local.vertical_speed,
-                         local.time_ms);
+                        pthread_mutex_lock(&vehicles[own].mutex);
+                        mon_vehicle(ownship, vehicles[own].vehicle);
+                        vehicles[own].fresh = false;
+                        pthread_mutex_unlock(&vehicles[own].mutex);
 
-                  latO = local.latitude;
-                  lonO = local.longitude;
-                  altO = local.altitude;
-                  gsO  = local.ground_speed;
-                  trkO = local.ground_track;
-                  vsO  = local.vertical_speed;
-                  step();
+                        for (int intr = own + 1; intr != nvehicles; ++intr) {
+                              pthread_mutex_lock(&vehicles[intr].mutex);
+                              mon_vehicle(intruder, vehicles[intr].vehicle);
+                              pthread_mutex_unlock(&vehicles[intr].mutex);
+
+                              run_monitor();
+                        }
+                  }
             }
+            delay();
       }
-
-      pthread_join(listener_tid, NULL);
       return 0;
 }
 
-void alert_wcv(void) { puts("alert: WCV violation!"); }
+int find_vehicle(const char (* number) [TAIL_NUMBER_SIZE]) {
+      assert(number);
+      for (int i = 0; i != nvehicles; ++i) {
+            if (!strncmp((const char *) number, (const char *) vehicles[i].vehicle.number, TAIL_NUMBER_SIZE)) {
+                  return i;
+            }
+      }
+      return -1;
+}
+
+int find_oldest(void) {
+      assert(nvehicles > 0);
+      int oldest = 0;;
+      long oldest_serial = vehicles[0].serial_number;
+      for (int i = 0; i != nvehicles; ++i) {
+            if (vehicles[i].serial_number > oldest_serial) {
+                  oldest = i;
+                  oldest_serial = vehicles[i].serial_number;
+            }
+      }
+      return oldest;
+}
+
+void update_vehicle(struct dai_mon_msg msg) {
+      int i;
+      if ((i = find_vehicle(&msg.vehicle.number)) != -1) {
+            pthread_mutex_lock(&vehicles[i].mutex);
+            vehicles[i].fresh = true;
+            vehicles[i].serial_number = msg.serial_number;
+            vehicles[i].vehicle = msg.vehicle;
+            pthread_mutex_unlock(&vehicles[i].mutex);
+      } else if (nvehicles < MAX_VEHICLES) {
+            vehicles[nvehicles].fresh = true;
+            vehicles[nvehicles].serial_number = msg.serial_number;
+            vehicles[nvehicles].vehicle = msg.vehicle;
+            pthread_mutex_init(&vehicles[nvehicles].mutex, NULL);
+            nvehicles++;
+      } else {
+            puts("Too many vehicles, replacing the oldest!");
+            int oldest = find_oldest();
+            pthread_mutex_lock(&vehicles[oldest].mutex);
+            vehicles[oldest].fresh = true;
+            vehicles[oldest].serial_number = msg.serial_number;
+            vehicles[oldest].vehicle = msg.vehicle;
+            pthread_mutex_unlock(&vehicles[oldest].mutex);
+      }
+}
+
+void * udp_listener(void * args) {
+      struct dai_mon_msg rcvd;
+
+      int self_socket;
+      if ((self_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
+            fail("socket");
+      }
+
+      struct sockaddr_in self_address = { 0 };
+      self_address.sin_family = AF_INET;
+      self_address.sin_port = htons(PORT);
+      self_address.sin_addr.s_addr = htonl(INADDR_ANY);
+
+      if (bind(self_socket, (struct sockaddr*) &self_address, sizeof(self_address)) == -1) {
+            fail("bind");
+      }
+
+      int current_serial = 0;
+      for (;;) {
+            printf("[UDP THREAD] waiting for data...\n");
+
+            struct sockaddr_in other_address;
+            socklen_t address_length = sizeof(other_address);
+            ssize_t actual_length;
+            if ((actual_length = recvfrom(self_socket, &rcvd, sizeof(rcvd), 0, (struct sockaddr *) &other_address, &address_length)) != sizeof(rcvd)) {
+                  fail("recvfrom()");
+            }
+
+            if (actual_length < sizeof(rcvd)) {
+                  puts("received packet fragment; discarding instead of attempting reassembly.");
+                  continue;
+            }
+
+            printf("[UDP THREAD] received packet from: %s:%u\n", inet_ntoa(other_address.sin_addr), ntohs(other_address.sin_port));
+
+            if (rcvd.serial_number < current_serial) {
+                  puts("received out-of-order packet; discarding.");
+                  continue;
+            }
+
+            current_serial = rcvd.serial_number;
+            update_vehicle(rcvd);
+      }
+
+      return NULL;
+}
+
+void mon_vehicle(struct mon_vehicle mon, struct vehicle vehicle) {
+      strncpy((char *) mon.number, (char *) &vehicle.number, TAIL_NUMBER_SIZE);
+      *mon.number[TAIL_NUMBER_SIZE - 1] = 0;
+      *mon.latitude = vehicle.latitude;
+      *mon.longitude = vehicle.longitude;
+      *mon.altitude = vehicle.altitude;
+      *mon.ground_speed = vehicle.ground_speed;
+      *mon.ground_track = vehicle.ground_track;
+      *mon.vertical_speed = vehicle.vertical_speed;
+}
+
+void run_monitor(void) {
+      printf("Checking: %s <==> %s\n", (char *) ownship.number, (char *) intruder.number);
+      step();
+}
+
+void alert_wcv(void) {
+      puts("*** Alert triggered: well-clear violation! ***");
+}
+
+void fail(const char * error) {
+      perror(error);
+      exit (1);
+}
+
+void delay(void) {
+      struct timespec ts = { .tv_nsec = DELAY * 1000000 };
+      nanosleep(&ts, NULL);
+}

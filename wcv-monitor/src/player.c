@@ -1,17 +1,22 @@
 #include <arpa/inet.h>
 #include <assert.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
-#include <stdbool.h>
 
 #include "dai_mon_data.h"
 #include "listener.h"
 
-static void fail(const char * error);
-static struct dai_mon_vehicle_data next_vehicle(FILE * restrict s);
+// Time to wait between sending packets (ms).
+#define DELAY 100
+
+static struct vehicle next_vehicle(FILE * restrict s);
 static bool is_help(const char * arg);
+static void fail(const char * error);
+static void delay(void);
 
 int main(int argc, char ** argv) {
       FILE * file = NULL;
@@ -44,7 +49,7 @@ int main(int argc, char ** argv) {
       if (inet_aton("127.0.0.1", &other_address.sin_addr) == 0)
             fail("inet_aton()");
 
-      struct dai_mon_msg msg = {0};
+      struct dai_mon_msg msg = { 0 };
 
       for (int i = 0; ; i++) {
             msg.serial_number = i;
@@ -54,16 +59,17 @@ int main(int argc, char ** argv) {
             if (sendto(other_socket, &msg, sizeof(msg), 0, (struct sockaddr *) &other_address, address_length) == -1)
                   fail("sendto()");
 
-            sleep(1);
+
+            delay();
       }
       close(other_socket);
       return 0;
 }
 
 // Parses and returns the next vehicle, otherwise halts the program on error or when the end of the file is reached.
-struct dai_mon_vehicle_data next_vehicle(FILE * restrict s) {
+struct vehicle next_vehicle(FILE * restrict s) {
       assert(s);
-      struct dai_mon_vehicle_data vehicle;
+      struct vehicle vehicle;
       double secs = 0;
       for (;;) {
             int nitems = fscanf(s, "%7[^,], %lf, %lf, %lf, %lf, %lf, %lf, %lf\n",
@@ -99,4 +105,9 @@ bool is_help(const char * arg) {
 void fail(const char * error) {
       perror(error);
       exit(1);
+}
+
+void delay(void) {
+      struct timespec ts = { .tv_nsec = DELAY * 1000000 };
+      nanosleep(&ts, NULL);
 }
