@@ -48,14 +48,17 @@ int main(int argc, char ** argv) {
             }
       }
 
-      if (argc == optind) {
-            puts("Reading from stdin...");
-            file = stdin;
-      } else if (argc - optind == 1) {
-            if (!(file = fopen(argv[optind], "r"))) fail("fopen");
-      } else {
-            print_usage(*argv);
-            exit(1);
+      switch (argc - optind) {
+            case 0:
+                  puts("Reading from stdin...");
+                  file = stdin;
+                  break;
+            case 1:
+                  if (!(file = fopen(argv[optind], "r"))) fail("fopen");
+                  break;
+            default:
+                  print_usage(*argv);
+                  exit(1);
       }
 
       struct sockaddr_in other_address = { 0 };
@@ -82,8 +85,6 @@ int main(int argc, char ** argv) {
 
             nap(delay);
       }
-      close(other_socket);
-      return 0;
 }
 
 // Parses and returns the next vehicle, otherwise halts the program on error or when the end of the file is reached.
@@ -91,31 +92,30 @@ struct vehicle next_vehicle(FILE * restrict s) {
       assert(s);
       struct vehicle vehicle;
       double secs = 0;
-      for (;;) {
-            int nitems = fscanf(s, "%7[^,], %lf, %lf, %lf, %lf, %lf, %lf, %lf\n",
-                        (char *) &vehicle.number, &vehicle.latitude, &vehicle.longitude, &vehicle.altitude,
-                        &vehicle.ground_track, &vehicle.ground_speed, &vehicle.vertical_speed, &secs);
+      int nitems = 0;
 
-            vehicle.time_ms = (unsigned) secs * 1000;
+      while ((nitems = fscanf(s, "%7[^,], %lf, %lf, %lf, %lf, %lf, %lf, %lf\n",
+                        (char *) &vehicle.number, &vehicle.latitude, &vehicle.longitude, &vehicle.altitude,
+                        &vehicle.ground_track, &vehicle.ground_speed, &vehicle.vertical_speed, &secs))
+                  != 8) {
 
             if (nitems == EOF) {
                   puts("End of input reached.");
+                  fclose(s);
                   exit(0);
             }
 
-            if (nitems == 8) {
-                  return vehicle;
-            }
-
+            // Otherwise, we read a partial line, so we need to gobble up the rest.
             size_t len;
             char * line = fgetln(s, &len);
             if (line) {
                   line[len - 1] = 0; // Newline to null.
                   printf("Error reading line; discarding: %s\n", line);
-            } else {
-                  puts("Error reading line; discarding.");
-            }
+            } else puts("Error reading line; discarding.");
       }
+
+      vehicle.time_ms = (unsigned) secs * 1000;
+      return vehicle;
 }
 
 void print_usage(const char * cmd) {
