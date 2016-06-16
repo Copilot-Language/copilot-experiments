@@ -94,7 +94,9 @@ int main(void) {
                   unlock(&vehicles[own].mutex);
 
                   if (fresh) {
-                        for (int intr = own + 1; intr != nvehicles; ++intr) {
+                        for (int intr = 0; intr != nvehicles; ++intr) {
+                              if (intr == own) continue;
+
                               lock(&vehicles[intr].mutex);
                               mon_vehicle(intruder, vehicles[intr].vehicle);
                               unlock(&vehicles[intr].mutex);
