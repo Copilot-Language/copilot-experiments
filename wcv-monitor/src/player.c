@@ -13,7 +13,7 @@
 #define DEFAULT_HOST "127.0.0.1"
 #define DEFAULT_PORT 10873
 // Time to wait between sending packets (ms).
-#define DEFAULT_DELAY 100
+#define DEFAULT_DELAY 20
 
 static struct vehicle next_vehicle(FILE * restrict s);
 static void fail(const char * error);

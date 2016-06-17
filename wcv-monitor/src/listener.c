@@ -12,23 +12,23 @@
 // Max number of vehicles encounterable before we start replacing the oldest.
 #define MAX_VEHICLES 500
 // Time to wait between checks (ms).
-#define DELAY 500
+#define DELAY 0
 // The port on which to listen for incoming data.
 #define PORT 10873
 
-char numO[TAIL_NUMBER_SIZE];
 double latO, lonO, gsO, trkO, altO, vsO;
-char numI[TAIL_NUMBER_SIZE];
 double latI, lonI, gsI, trkI, altI, vsI;
 
 // TODO(chathhorn): initialize these
-double dthr = 1000;
-double tthr = 1000;
-double zthr = 1000;
-double tcoathr = 1000;
+double dthr = 50;   // feet
+double zthr = 100;  // feet
+double tcoathr = 0; // seconds
+double tthr = 15;   // seconds
 
 struct mon_vehicle {
-      char (* number)[TAIL_NUMBER_SIZE];
+      char number[TAIL_NUMBER_SIZE];
+      long time_ms;
+
       double * latitude;        // degrees
       double * longitude;       // degrees
       double * altitude;        // feet
@@ -45,7 +45,6 @@ struct vehicle_meta {
 };
 
 static struct mon_vehicle ownship = {
-      .number = &numO,
       .latitude = &latO,
       .longitude = &lonO,
       .altitude = &altO,
@@ -55,7 +54,6 @@ static struct mon_vehicle ownship = {
 };
 
 static struct mon_vehicle intruder = {
-      .number = &numI,
       .latitude = &latI,
       .longitude = &lonI,
       .altitude = &altI,
@@ -67,7 +65,7 @@ static struct mon_vehicle intruder = {
 static int nvehicles;
 static struct vehicle_meta vehicles[MAX_VEHICLES];
 
-static void mon_vehicle(struct mon_vehicle, struct vehicle);
+static void mon_vehicle(struct mon_vehicle *, struct vehicle);
 static void fail(const char *);
 static void * udp_listener(void *);
 static int find_vehicle(const char (*)[TAIL_NUMBER_SIZE]);
@@ -86,23 +84,23 @@ int main(void) {
       while (nvehicles < 2) nap();
 
       for (;;) {
-            for (int own = 0; own != nvehicles - 1; ++own) {
+            for (int own = 0; own != nvehicles; ++own) {
                   lock(&vehicles[own].mutex);
-                  mon_vehicle(ownship, vehicles[own].vehicle);
+                  mon_vehicle(&ownship, vehicles[own].vehicle);
                   bool fresh = vehicles[own].fresh;
                   vehicles[own].fresh = false;
                   unlock(&vehicles[own].mutex);
 
-                  if (fresh) {
-                        for (int intr = 0; intr != nvehicles; ++intr) {
-                              if (intr == own) continue;
+                  if (!fresh) continue;
 
-                              lock(&vehicles[intr].mutex);
-                              mon_vehicle(intruder, vehicles[intr].vehicle);
-                              unlock(&vehicles[intr].mutex);
+                  for (int intr = 0; intr != nvehicles; ++intr) {
+                        if (intr == own) continue;
 
-                              run_monitor();
-                        }
+                        lock(&vehicles[intr].mutex);
+                        mon_vehicle(&intruder, vehicles[intr].vehicle);
+                        unlock(&vehicles[intr].mutex);
+
+                        run_monitor();
                   }
             }
             nap();
@@ -205,25 +203,27 @@ void * udp_listener(void * args) {
       return NULL;
 }
 
-void mon_vehicle(struct mon_vehicle mon, struct vehicle vehicle) {
-      strncpy((char *) mon.number, (char *) &vehicle.number, TAIL_NUMBER_SIZE);
-      *mon.number[TAIL_NUMBER_SIZE - 1] = 0;
-      *mon.latitude = vehicle.latitude;
-      *mon.longitude = vehicle.longitude;
-      *mon.altitude = vehicle.altitude;
-      *mon.ground_speed = vehicle.ground_speed;
-      *mon.ground_track = vehicle.ground_track;
-      *mon.vertical_speed = vehicle.vertical_speed;
+void mon_vehicle(struct mon_vehicle * mon, struct vehicle vehicle) {
+      strncpy((char *) &mon->number, (char *) &vehicle.number, TAIL_NUMBER_SIZE);
+      mon->number[TAIL_NUMBER_SIZE - 1] = 0;
+      mon->time_ms = vehicle.time_ms;
+      *mon->latitude = vehicle.latitude;
+      *mon->longitude = vehicle.longitude;
+      *mon->altitude = vehicle.altitude;
+      *mon->ground_speed = vehicle.ground_speed;
+      *mon->ground_track = vehicle.ground_track;
+      *mon->vertical_speed = vehicle.vertical_speed;
 }
 
 void run_monitor(void) {
-      printf("Checking: %s <==> %s\n", (char *) ownship.number, (char *) intruder.number);
+      printf("Checking @ %lds: %s <==> %s\n", ownship.time_ms/1000, (char *) ownship.number, (char *) intruder.number);
       step();
 }
 
 void alert_wcv(void) {
       puts("*** Alert triggered: well-clear violation!");
-      printf("*** Ownship: %s, Intruder: %s\n", (char *) ownship.number, (char *) intruder.number);
+      printf("*** Ownship @ %lds: %s, Intruder @ %lds: %s\n",
+                  ownship.time_ms/1000, (char *) ownship.number, intruder.time_ms/1000, (char *) intruder.number);
 }
 
 void lock(pthread_mutex_t * mutex) {
