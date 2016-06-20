@@ -24,25 +24,25 @@ sec  = constant 1
 min  = constant 60
 knot = constant 1852/3600
 
--- | Ownship: lat, lon (rad); ground speed, track, vert speed (m/s); altitude (m).
+-- | Ownship: lat, lon, track (rad); ground speed, vert speed (m/s); altitude (m).
 latO, lonO, gsO, trkO, vsO, altO :: Stream Double
 latO = extern "latO" Nothing * deg
 lonO = extern "lonO" Nothing * deg
-altO = extern "altO" Nothing * deg
-gsO  = extern "gsO"  Nothing * knot
+altO = extern "altO" Nothing * ft
 trkO = extern "trkO" Nothing * deg
+gsO  = extern "gsO"  Nothing * knot
 vsO  = extern "vsO"  Nothing * ft/min
 
--- | Intruder: lat, lon (rad); ground speed, track, vert speed (m/s); altitude (m).
+-- | Intruder: lat, lon, track  (rad); ground speed, vert speed (m/s); altitude (m).
 latI, lonI, gsI, trkI, vsI, altI :: Stream Double
 latI = extern "latI" Nothing * deg
 lonI = extern "lonI" Nothing * deg
-altI = extern "altI" Nothing * deg
-gsI  = extern "gsI"  Nothing * knot
+altI = extern "altI" Nothing * ft
 trkI = extern "trkI" Nothing * deg
+gsI  = extern "gsI"  Nothing * knot
 vsI  = extern "vsI"  Nothing * ft/min
 
--- | Thresholds: dthr (m), tthr (s), zthr (m), tcoathr (s).
+-- | Thresholds: dthr (m), zthr (m), tthr (s), tcoathr (s).
 dthr, tthr, zthr, tcoathr :: Stream Double
 dthr    = extern "dthr"    Nothing * ft
 zthr    = extern "zthr"    Nothing * ft
@@ -52,7 +52,7 @@ tcoathr = extern "tcoathr" Nothing * sec
 spherical2xyz :: Stream Double -> Stream Double -> Vect3
 spherical2xyz lat lon = (x, y, z)
       where r     = 6371000 -- Radius of the earth in meters
-            theta = pi / 2 - lat
+            theta = pi/2 - lat -- Convert latitude to 0-pi
             phi   = pi - lon
             x     = r * sin theta * cos phi
             y     = r * sin theta * sin phi
@@ -84,7 +84,7 @@ vect3_orthonorm_toz :: Vect3 -> Vect3
 vect3_orthonorm_toz = unit . vect3_orthog_toz
 
 sphere_to_2D_plane :: Vect3 -> Vect3 -> Vect2
-sphere_to_2D_plane nzv w = (ymult `dot3` w, zmult `dot3` w)
+sphere_to_2D_plane nzv w = (ymult `dot3` w, - (zmult `dot3` w))
       where ymult = vect3_orthonorm_toy nzv
             zmult = vect3_orthonorm_toz nzv
 
@@ -140,7 +140,7 @@ det :: Vect2 -> Vect2 -> Stream Double
 det (x1, y1) (x2, y2) = (x1 * y2) - (x2 * y1)
 
 (~=) :: Stream Double -> Stream Double -> Stream Bool
-a ~= b = abs (a - b) < 0.001
+a ~= b = abs (a - b) < 0.000001
 
 neg :: Vect2 -> Vect2
 neg (x, y) = (negate x, negate y)
@@ -165,7 +165,7 @@ tep s v = mux ((s |*| v < 0) && (delta s v dthr >= 0))
 
 delta :: Vect2 -> Vect2 -> Stream Double -> Stream Double
 delta s v d = d * d * sq v - (det s v * det s v)
--- Here the formula says : (s . orth v)^2 which is the same as det(s,v)^2
+-- Here the formula says: (s . orth v)^2 which is the same as det(s,v)^2
 
 theta :: Vect2 -> Vect2 -> Stream Double -> Stream Double -> Stream Double
 theta s v d e = (-(s |*| v) + e * sqrt (delta s v d)) / sq v
@@ -197,5 +197,11 @@ horizontalWCV :: (Vect2 -> Vect2 -> Stream Double) -> Vect2 -> Vect2 -> Stream B
 horizontalWCV tvar s v = (norm s <= dthr) || ((dcpa s v <= dthr) && (0 <= tvar s v) && (tvar s v <= tthr))
 
 spec :: Spec
-spec = trigger "alert_wcv" (wcv taumod s sz v vz) []
+spec = do
+      -- trigger "alert_wcv_tau" (wcv tau s sz v vz) []
+      -- trigger "alert_wcv_tcpa" (wcv tcpa s sz v vz) []
+      trigger "alert_wcv_taumod" (wcv taumod s sz v vz) []
+      -- trigger "alert_wcv_tep" (wcv tep s sz v vz) []
+      -- trigger "alert_wcv_vertical" (verticalWCV sz vz) []
+
 main = reify spec >>= S.compile S.defaultParams

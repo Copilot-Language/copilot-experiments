@@ -16,6 +16,16 @@
 // The port on which to listen for incoming data.
 #define PORT 10873
 
+#define STRICT_ALERTS 1
+
+#ifdef DEBUG
+#define TRACE(fmt, ...) fprintf(stderr, "DEBUG: %s:%d: " fmt, __FILE__, __LINE__, __VA_ARGS__)
+#define TRACELN(fmt) fprintf(stderr, "DEBUG: %s:%d: " fmt "\n", __FILE__, __LINE__)
+#else
+#define TRACE(fmt, ...)
+#define TRACELN(fmt)
+#endif
+
 double latO, lonO, gsO, trkO, altO, vsO;
 double latI, lonI, gsI, trkI, altI, vsI;
 
@@ -175,7 +185,7 @@ void * udp_listener(void * args) {
 
       int current_serial = 0;
       for (;;) {
-            printf("[UDP THREAD] waiting for data...\n");
+            TRACELN("[UDP THREAD] waiting for data...");
 
             struct sockaddr_in other_address;
             socklen_t address_length = sizeof(other_address);
@@ -185,14 +195,14 @@ void * udp_listener(void * args) {
             }
 
             if (actual_length < sizeof(rcvd)) {
-                  puts("received packet fragment; discarding instead of attempting reassembly.");
+                  TRACELN("received packet fragment; discarding instead of attempting reassembly.");
                   continue;
             }
 
-            printf("[UDP THREAD] received packet from: %s:%u\n", inet_ntoa(other_address.sin_addr), ntohs(other_address.sin_port));
+            TRACE("[UDP THREAD] received packet from: %s:%u\n", inet_ntoa(other_address.sin_addr), ntohs(other_address.sin_port));
 
             if (rcvd.serial_number < current_serial) {
-                  puts("received out-of-order packet; discarding.");
+                  TRACELN("received out-of-order packet; discarding.");
                   continue;
             }
 
@@ -216,14 +226,17 @@ void mon_vehicle(struct mon_vehicle * mon, struct vehicle vehicle) {
 }
 
 void run_monitor(void) {
-      printf("Checking @ %lds: %s <==> %s\n", ownship.time_ms/1000, (char *) ownship.number, (char *) intruder.number);
+      TRACE("Checking: %s @ %lds <==> %s @ %lds\n",
+            (char *) ownship.number, ownship.time_ms/1000, (char *) intruder.number, intruder.time_ms/1000);
       step();
 }
 
-void alert_wcv(void) {
-      puts("*** Alert triggered: well-clear violation!");
-      printf("*** Ownship @ %lds: %s, Intruder @ %lds: %s\n",
-                  ownship.time_ms/1000, (char *) ownship.number, intruder.time_ms/1000, (char *) intruder.number);
+void alert_wcv_taumod(void) {
+      if (!STRICT_ALERTS || ownship.time_ms == intruder.time_ms) {
+            puts("*** Alert triggered: well-clear (taumod) violation!");
+            printf("*** Ownship @ %lds: %s, Intruder @ %lds: %s\n",
+                        ownship.time_ms/1000, (char *) ownship.number, intruder.time_ms/1000, (char *) intruder.number);
+      }
 }
 
 void lock(pthread_mutex_t * mutex) {
