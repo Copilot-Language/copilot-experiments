@@ -18,11 +18,11 @@ type Vect3 = (Stream Double, Stream Double, Stream Double)
 
 -- | Units (conversions to SI).
 deg, ft, sec, min, knot :: Stream Double
-deg  = constant pi/180
+deg  = constant (pi/180)
 ft   = constant 0.3048
 sec  = constant 1
 min  = constant 60
-knot = constant 1852/3600
+knot = constant (1852/3600)
 
 -- | Ownship: lat, lon, track (rad); ground speed, vert speed (m/s); altitude (m).
 latO, lonO, gsO, trkO, vsO, altO :: Stream Double
@@ -49,14 +49,35 @@ zthr    = extern "zthr"    Nothing * ft
 tthr    = extern "tthr"    Nothing * sec
 tcoathr = extern "tcoathr" Nothing * sec
 
+-- | Taylor series approximations of sin and cos.
+sin', cos' :: Stream Double -> Stream Double
+sin' = flip local $ \x -> x - (pow3 x)/6 + (pow5 x)/120 - (pow7 x)/5040 + (pow9 x)/362880 - (pow11 x)/39916800 + (pow13 x)/6227020800
+cos' = flip local $ \x -> 1 - (pow2 x)/2 + (pow4 x)/24  - (pow6 x)/720  + (pow8 x)/40320  - (pow10 x)/3628800  + (pow12 x)/479001600
+-- sin' x' = local x' $ \x -> x - (x ** 3)/6 + (x ** 5)/120 - (x ** 7)/5040 + (x ** 9)/362880 - (x ** 11)/39916800 + (x ** 13)/6227020800
+-- cos' x' = local x' $ \x -> 1 - (x ** 2)/2 + (x ** 4)/24  - (x ** 6)/720  + (x ** 8)/40320  - (x ** 10)/3628800  + (x ** 12)/479001600
+
+pow2, pow3, pow4, pow5, pow6, pow7, pow8, pow9, pow10, pow11, pow12, pow13 :: Stream Double -> Stream Double
+pow2 x = x * x
+pow3 x = pow2 x * x
+pow4 x = pow3 x * x
+pow5 x = pow4 x * x
+pow6 x = pow5 x * x
+pow7 x = pow6 x * x
+pow8 x = pow7 x * x
+pow9 x = pow8 x * x
+pow10 x = pow9 x * x
+pow11 x = pow10 x * x
+pow12 x = pow11 x * x
+pow13 x = pow12 x * x
+
 spherical2xyz :: Stream Double -> Stream Double -> Vect3
-spherical2xyz lat lon = (x, y, z)
+spherical2xyz lat lon = (label "?x" x, label "?y" y, label "?z" z)
       where r     = 6371000 -- Radius of the earth in meters
             theta = pi/2 - lat -- Convert latitude to 0-pi
             phi   = pi - lon
-            x     = r * sin theta * cos phi
-            y     = r * sin theta * sin phi
-            z     = r * cos theta
+            x     = r * sin' theta * cos' phi
+            y     = r * sin' theta * sin' phi
+            z     = r * cos' theta
 
 dot3 :: Vect3 -> Vect3 -> Stream Double
 dot3 (x1, y1, z1) (x2, y2, z2) = x1 * x2 + y1 * y2 + z1 * z2
@@ -102,10 +123,10 @@ sIx, sIy, sIz :: Stream Double
       where (sI2x, sI2y) = sphere_to_2D_plane pO pI
 
 vOx, vOy, vOz :: Stream Double
-(vOx, vOy, vOz) = (gsO * sin trkO, gsO * cos trkO, vsO)
+(vOx, vOy, vOz) = (gsO * sin' trkO, gsO * cos' trkO, vsO)
 
 vIx, vIy, vIz :: Stream Double
-(vIx, vIy, vIz) = (gsI * sin trkI, gsI * cos trkI, vsI)
+(vIx, vIy, vIz) = (gsI * sin' trkI, gsI * cos' trkI, vsI)
 
 --------------------------------
 -- latI velocity/position --
@@ -175,7 +196,7 @@ theta s v d e = (-(s |*| v) + e * sqrt (delta s v d)) / sq v
 --------------------------
 
 tcoa :: Stream Double -> Stream Double -> Stream Double
-tcoa sz vz = mux ((sz * vz) < 0) ((-sz) / vz) (-1)
+tcoa sz' vz' = local sz' $ \sz -> local vz' $ \vz -> mux ((sz * vz) < 0) ((-sz) / vz) (-1)
 
 dcpa :: Vect2 -> Vect2 -> Stream Double
 dcpa s@(sx, sy) v@(vx, vy) = norm (sx + tcpa s v * vx, sy + tcpa s v * vy)
@@ -191,7 +212,7 @@ wcv :: (Vect2 -> Vect2 -> Stream Double) ->
 wcv tvar s sz v vz = horizontalWCV tvar s v && verticalWCV sz vz
 
 verticalWCV :: Stream Double -> Stream Double -> Stream Bool
-verticalWCV sz vz = (abs sz <= zthr) || (0 <= tcoa sz vz && tcoa sz vz <= tcoathr)
+verticalWCV sz' vz' = local sz' $ \sz -> local vz' $ \vz -> (abs sz <= zthr) || (0 <= tcoa sz vz && tcoa sz vz <= tcoathr)
 
 horizontalWCV :: (Vect2 -> Vect2 -> Stream Double) -> Vect2 -> Vect2 -> Stream Bool
 horizontalWCV tvar s v = (norm s <= dthr) || ((dcpa s v <= dthr) && (0 <= tvar s v) && (tvar s v <= tthr))
@@ -204,4 +225,4 @@ spec = do
       -- trigger "alert_wcv_tep" (wcv tep s sz v vz) []
       -- trigger "alert_wcv_vertical" (verticalWCV sz vz) []
 
-main = reify spec >>= S.compile S.defaultParams
+main = reify spec >>= S.proofACSL S.defaultParams
